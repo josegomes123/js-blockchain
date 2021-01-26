@@ -1,6 +1,8 @@
 import sha256 from './node_modules/crypto-js/sha256.js';
 import elliptic from 'elliptic';
-import * as KeyGen from "./keyGenerator.js";
+import * as KeyGen from './keyGenerator.js';
+const EC = elliptic.ec;
+const ec = new EC('secp256k1');
 
 class Blockchain {
 	constructor() {
@@ -19,16 +21,31 @@ class Blockchain {
 	}
 
 	minePendingTransaction(miningRewardAddress) {
-		let block = new Block(Date.now(), this.pendingTransaction);
+		const rewardTransaction = new Transaction(
+			null,
+			miningRewardAddress,
+			this.miningReward
+		);
+		this.pendingTransaction.push(rewardTransaction);
+
+		let block = new Block(
+			Date.now(),
+			this.pendingTransaction,
+			this.getLatestBlock().hash
+		);
 		block.mineBlock(this.difficulty);
 		console.log('Block successfully mined!');
 		this.blockchain.push(block);
-		this.pendingTransaction = [
-			new Transaction(null, miningRewardAddress, this.miningReward),
-		];
+		this.pendingTransaction = [];
 	}
 
-	createTransaction(transaction) {
+	addTransaction(transaction) {
+		if (!transaction.fromAddress || !transaction.toAddress) {
+			throw new Error('Transaction must include from and to address');
+		}
+		if (!transaction.isValid()) {
+			throw new Error('Cannot add invalid transaction to the chain');
+		}
 		this.pendingTransaction.push(transaction);
 	}
 
@@ -52,6 +69,9 @@ class Blockchain {
 		for (let i = 1; i < this.blockchain.length; i++) {
 			const currentBlock = this.blockchain[i];
 			const previousBlock = this.blockchain[i - 1];
+			if (!currentBlock.hasValidTransactions()) {
+				return false;
+			}
 			// Hash of each block has to be valid
 			if (currentBlock.hash !== currentBlock.calculateHash()) {
 				return false;
@@ -97,6 +117,11 @@ class Block {
 		}
 		console.log('Block mined: ' + this.hash);
 	}
+
+	hasValidTransactions() {
+		// all transactions should be valid in a block
+		return this.transactions.every((tx) => tx.isValid());
+	}
 }
 
 class Transaction {
@@ -111,17 +136,22 @@ class Transaction {
 	}
 
 	signTransaction(signingKey) {
-        if (signingKey.getPublic("hex") !== this.fromAddress){
-            throw new Error("You cannot sign transactions for other wallets!")
-        }
+		if (signingKey.getPublic('hex') !== this.fromAddress) {
+			throw new Error('You cannot sign transactions for other wallets!');
+		}
 		const hashTransaction = this.calculateHash();
 		const sign = signingKey.sign(hashTransaction, 'base64');
 		this.signature = sign.toDER('hex');
-    }
-    
-    isValid(){
-        this.
-    }
+	}
+
+	isValid() {
+		if (this.fromAddress === null) return true;
+		if (!this.signature || this.signature.length === 0) {
+			throw new Error('No signature in this transaction');
+		}
+		const publicKey = ec.keyFromPublic(this.fromAddress, 'hex');
+		return publicKey.verify(this.calculateHash(), this.signature);
+	}
 }
 
 export { Transaction, Blockchain, Block };
